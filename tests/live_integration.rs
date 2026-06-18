@@ -24,41 +24,40 @@ fn url() -> String {
     std::env::var("FALKORDB_URL").unwrap_or_else(|_| "falkor://127.0.0.1:6379".into())
 }
 
-/// Create a uniquely named graph, seed it with `setup_cypher`, and return its name.
+/// Seed `name` with `setup_cypher`. Returns an error instead of panicking, so the caller can run
+/// cleanup even when seeding fails.
 async fn seed_graph(
-    suffix: &str,
+    name: &str,
     setup_cypher: &str,
-) -> String {
-    let name = format!("falkordb_mcp_it_{}_{}", std::process::id(), suffix);
-    let info: FalkorConnectionInfo = url().as_str().try_into().expect("connection info");
+) -> anyhow::Result<()> {
+    let info: FalkorConnectionInfo = url().as_str().try_into()?;
     let client = FalkorClientBuilder::new_async()
         .with_connection_info(info)
         .build()
-        .await
-        .expect("seed client connects");
-    let mut graph = client.select_graph(&name);
+        .await?;
+    let mut graph = client.select_graph(name);
     graph.delete().await.ok(); // ignore "graph does not exist"
-    graph
-        .query(setup_cypher)
-        .execute()
-        .await
-        .expect("seed query runs");
-    name
+    graph.query(setup_cypher).execute().await?;
+    Ok(())
 }
 
+/// Best-effort graph deletion: never panics, so it is safe to call unconditionally for cleanup.
 async fn drop_graph(name: &str) {
-    let info: FalkorConnectionInfo = url().as_str().try_into().expect("connection info");
-    let client = FalkorClientBuilder::new_async()
+    let Ok(info) = FalkorConnectionInfo::try_from(url().as_str()) else {
+        return;
+    };
+    if let Ok(client) = FalkorClientBuilder::new_async()
         .with_connection_info(info)
         .build()
         .await
-        .expect("cleanup client connects");
-    client.select_graph(name).delete().await.ok();
+    {
+        client.select_graph(name).delete().await.ok();
+    }
 }
 
-/// Seed a graph, connect a backend, run `op`, then **always** drop the graph. Returns `op`'s result
-/// (a connect failure surfaces as `Err`) together with the graph name, so the caller asserts only
-/// after cleanup has run.
+/// Generate a unique graph name, then seed it, connect a backend, and run `op` — all as fallible work
+/// captured into a `Result` — and **always** drop the graph afterwards. Returns `op`'s result (a
+/// seed/connect failure surfaces as `Err`) and the name, so the caller asserts only after cleanup.
 async fn run_live<F, Fut, T>(
     suffix: &str,
     setup_cypher: &str,
@@ -68,8 +67,9 @@ where
     F: FnOnce(FalkorClientBackend, String) -> Fut,
     Fut: Future<Output = anyhow::Result<T>>,
 {
-    let name = seed_graph(suffix, setup_cypher).await;
+    let name = format!("falkordb_mcp_it_{}_{}", std::process::id(), suffix);
     let result = async {
+        seed_graph(&name, setup_cypher).await?;
         let backend = FalkorClientBackend::connect(&url()).await?;
         op(backend, name.clone()).await
     }

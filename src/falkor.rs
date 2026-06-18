@@ -38,7 +38,13 @@ impl FalkorClientBackend {
             .with_connection_info(connection_info)
             .build()
             .await
-            .map_err(|e| anyhow::anyhow!("failed to connect to FalkorDB: {e}"))?;
+            .map_err(|_| {
+                // Deliberately not interpolating the client error: it may carry the connection
+                // string (and thus credentials). Keep operator logs credential-free.
+                anyhow::anyhow!(
+                    "failed to connect to FalkorDB (check FALKORDB_URL and that the server is reachable)"
+                )
+            })?;
         Ok(Self { client })
     }
 }
@@ -148,6 +154,14 @@ impl FalkorBackend for FalkorClientBackend {
         // `.await` in this method body, so its own future stays `Send`). This needs the multi-thread
         // runtime, which the binary uses (`#[tokio::main]`). See `docs/upstream-falkordb-rs.md` for
         // the one-line upstream change that would let this be a plain `.await` on any runtime.
+        if tokio::runtime::Handle::current().runtime_flavor()
+            == tokio::runtime::RuntimeFlavor::CurrentThread
+        {
+            anyhow::bail!(
+                "explain requires a multi-threaded Tokio runtime (the falkordb query plan is driven \
+                 with block_in_place); run the server under #[tokio::main] / a multi-thread runtime"
+            );
+        }
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let mut graph = self.client.select_graph(graph);
