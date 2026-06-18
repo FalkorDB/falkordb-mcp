@@ -40,6 +40,97 @@ server rejects if a query attempts a write. **Guarded write tools are opt-in** �
 Results are capped (`limit`, default `FALKORDB_MCP_MAX_ROWS`) so a broad query can't flood the model's
 context; a capped result is flagged as truncated.
 
+## Example sessions
+
+What actually happens between the assistant and this server. Each example starts with the user's
+prompt, shows the tool calls the model makes (**▸ request** to the server, **◂ response** from it),
+and ends with the answer the model gives back. The **◂ responses are the server's real output** (a
+demo `imdb` graph; some Cypher is wrapped for readability).
+
+### 1. Answering a question from live data
+
+> **You:** "Which movies did Keanu Reeves act in, and what were his roles?"
+
+The model first reads the schema, so it uses the graph's *real* labels and property keys instead of
+guessing:
+
+```text
+▸ get_schema   { "graph": "imdb" }
+◂ {
+    "labels": ["Actor", "Movie"],
+    "relationship_types": ["ACTED_IN"],
+    "property_keys": ["name", "born", "title", "year", "rating", "role"],
+    "indexes": ["NODE :Actor(name)"],
+    "constraints": []
+  }
+```
+
+Now it writes a correct, **parameterized** read query (the name is a bound parameter, never spliced
+into the Cypher) and gets real rows back:
+
+```text
+▸ query_read {
+    "graph": "imdb",
+    "cypher": "MATCH (a:Actor {name: $name})-[r:ACTED_IN]->(m:Movie)
+               RETURN m.title AS title, m.year AS year, r.role AS role ORDER BY m.year",
+    "params": { "name": "Keanu Reeves" }
+  }
+◂ {
+    "columns": ["title", "year", "role"],
+    "rows": [
+      ["The Matrix", 1999, "Neo"],
+      ["The Matrix Reloaded", 2003, "Neo"],
+      ["John Wick", 2014, "John Wick"]
+    ],
+    "truncated": false
+  }
+```
+
+> **Assistant:** "In this graph, Keanu Reeves acted in three movies: *The Matrix* (1999) and *The
+> Matrix Reloaded* (2003) as **Neo**, and *John Wick* (2014) as **John Wick**."
+
+**Value:** the answer is grounded in the live database and the real schema — not a guess, and not a
+query the user has to run themselves.
+
+### 2. Diagnosing a slow query
+
+> **You:** "Why is `MATCH (m:Movie {title:'The Matrix'}) RETURN m` slow on a large graph?"
+
+The model inspects the plan **without executing** the query:
+
+```text
+▸ explain {
+    "graph": "imdb",
+    "cypher": "MATCH (m:Movie {title:'The Matrix'}) RETURN m"
+  }
+◂ ["Results", "    Project", "        Filter", "            Node By Label Scan | (m:Movie)"]
+```
+
+> **Assistant:** "It does a full **`Node By Label Scan`** over every `Movie`, because there's no index
+> on `Movie.title`. Add one — `CREATE INDEX FOR (m:Movie) ON (m.title)` — and the same query becomes a
+> `Node By Index Scan`. (Your `Actor.name` lookups already use an index, so they're fast.)"
+
+**Value:** the model reads the actual query plan and gives a concrete, correct optimization — the kind
+of thing a static schema doc can't tell it.
+
+### 3. Read-only by construction
+
+> **You:** "Just delete all the `Actor` nodes to clean up."
+
+Even if the model tries, the read tool runs through `GRAPH.RO_QUERY`, and the **server** refuses the
+write:
+
+```text
+▸ query_read { "graph": "imdb", "cypher": "MATCH (a:Actor) DETACH DELETE a" }
+◂ error: "… is to be executed only on read-only queries"
+```
+
+> **Assistant:** "I can't do that — this server is read-only, so FalkorDB rejected the delete. If you
+> really want to allow writes, the operator has to start the server with `FALKORDB_MCP_ALLOW_WRITES=1`."
+
+**Value:** safety is enforced by the database, not by trusting the model to behave. Writes are an
+explicit operator opt-in (see [Writes](#writes-opt-in)).
+
 ## Why an MCP server (not a Markdown doc or a "skill")?
 
 You could instead describe your graph to the assistant some other way — a Markdown file, an `llms.txt`,
