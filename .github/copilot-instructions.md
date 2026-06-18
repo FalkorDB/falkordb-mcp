@@ -23,13 +23,15 @@ changing, update the `just` recipe **and** the CI workflow together so they stay
 | `just done` | Definition-of-done gates (`fmt-check`, `clippy`, `clippy-all`, `build`, `doc`, `deny`, `test`). Must be green before declaring a task done. |
 | `just verify` | `ci` **plus** `coverage`. |
 | `just test` | Run the test suite (nextest). **Hermetic** — unit tests use a fake backend, no database needed. |
-| `just coverage` | Codecov JSON coverage (matches the `coverage` CI job). |
+| `just coverage` | Codecov JSON coverage (matches the `coverage` CI job). Runs the hermetic suite **plus** the live integration tests, so it needs a FalkorDB server — use `just coverage-local` for Docker. |
 | `just spellcheck` | Spellcheck the Markdown docs. |
 | `just spellcheck-pr-title` | Spellcheck a PR title (`PR_TITLE='…' just spellcheck-pr-title`). |
 
-The tests are **hermetic** (no FalkorDB server required): tools are tested through the
-[`FalkorBackend`](src/backend.rs) trait with a fake implementation. Any test that talks to a real
-database must be **opt-in and skippable**, never a default CI gate (see "Flaky tests").
+The required test gate (`just test` / the `check-test` CI job) is **hermetic** (no FalkorDB server
+required): tools are tested through the [`FalkorBackend`](src/backend.rs) trait with a fake
+implementation. Tests that talk to a real database are `#[ignore]`d and **opt-in** (`just
+test-integration`); they are never part of the required gate. They *are* run — against a FalkorDB
+service container — in the (non-required) `coverage` job, so the real backend still gets covered.
 
 ## Definition of done for a change
 
