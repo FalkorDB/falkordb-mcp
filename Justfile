@@ -81,13 +81,22 @@ test-doc:
 
 # === Coverage (hermetic — no server required) ================================
 
-# Generate Codecov JSON coverage (matches the `coverage` CI job).
+# Generate Codecov JSON coverage (matches the `coverage` CI job): the hermetic suite PLUS the live
+# integration tests, so it covers the real FalkorDB backend and needs a reachable server
+# (FALKORDB_URL). Use `just coverage-local` to manage one in Docker.
 coverage:
-    cargo llvm-cov nextest --all --codecov --output-path codecov.json
+    FALKORDB_URL="falkor://{{host}}:{{port}}" \
+        cargo llvm-cov nextest --all --run-ignored all --codecov --output-path codecov.json
 
-# Generate an HTML coverage report and open it.
+# Generate an HTML coverage report and open it (also needs a reachable FalkorDB server).
 coverage-html:
-    cargo llvm-cov nextest --all --open
+    FALKORDB_URL="falkor://{{host}}:{{port}}" \
+        cargo llvm-cov nextest --all --run-ignored all --open
+
+# Spin up a server, collect coverage (hermetic + live), then tear it down.
+coverage-local: db-up
+    @just coverage || (just db-down && exit 1)
+    @just db-down
 
 # === Spellcheck ==============================================================
 

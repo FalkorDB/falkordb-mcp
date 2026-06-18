@@ -146,9 +146,11 @@ just test       # hermetic test suite (fake backend — no FalkorDB server neede
 just spellcheck # spellcheck the Markdown docs
 ```
 
-The unit/integration suite is **hermetic**: tools are tested through the `FalkorBackend` trait with a
-fake implementation, so no database is required. The opt-in `just test-integration` recipe (and the
-`db-*` Docker helpers) exercise a real server and are never a CI gate.
+The required test gate (`just test`) is **hermetic**: tools are tested through the `FalkorBackend`
+trait with a fake implementation, so no database is required. The live `#[ignore]`d tests are opt-in
+via `just test-integration` (and the `db-*` Docker helpers manage a server) — they are never part of
+the required gate, but they do run, against a FalkorDB service container, in the `coverage` job, so
+the real backend is covered too. Use `just coverage-local` to collect coverage locally with Docker.
 
 See [`.github/copilot-instructions.md`](.github/copilot-instructions.md) for the full contribution
 conventions.
