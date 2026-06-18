@@ -15,6 +15,11 @@ set shell := ["bash", "-uc"]
 host := env_var_or_default("FALKORDB_HOST", "127.0.0.1")
 port := env_var_or_default("FALKORDB_PORT", "6379")
 
+# Connection URL the live recipes pass to the tests/binary. Respects a `FALKORDB_URL` from the
+# environment (so you can point at a remote server, or one needing credentials/TLS); otherwise it is
+# built from host/port. Override any of these on the CLI, e.g. `just port=6380 test-integration`.
+url := env_var_or_default("FALKORDB_URL", "falkor://" + host + ":" + port)
+
 # Docker image and container name used by the `db-*` helpers.
 image := "falkordb/falkordb:edge"
 container := "falkordb-mcp-dev"
@@ -83,14 +88,14 @@ test-doc:
 
 # Generate Codecov JSON coverage (matches the `coverage` CI job): the hermetic suite PLUS the live
 # integration tests, so it covers the real FalkorDB backend and needs a reachable server
-# (FALKORDB_URL). Use `just coverage-local` to manage one in Docker.
+# (set `FALKORDB_URL`, or `FALKORDB_HOST`/`FALKORDB_PORT`). Use `just coverage-local` for Docker.
 coverage:
-    FALKORDB_URL="falkor://{{host}}:{{port}}" \
+    FALKORDB_URL="{{url}}" \
         cargo llvm-cov nextest --all --run-ignored all --codecov --output-path codecov.json
 
 # Generate an HTML coverage report and open it (also needs a reachable FalkorDB server).
 coverage-html:
-    FALKORDB_URL="falkor://{{host}}:{{port}}" \
+    FALKORDB_URL="{{url}}" \
         cargo llvm-cov nextest --all --run-ignored all --open
 
 # Spin up a server, collect coverage (hermetic + live), then tear it down.
@@ -114,9 +119,10 @@ spellcheck-pr-title:
 # === Opt-in live integration (NOT a CI gate) =================================
 # These talk to a real FalkorDB server. Use `just test-integration-local` to manage one.
 
-# Run the `#[ignore]`-marked tests that require a live FalkorDB server.
+# Run the `#[ignore]`-marked tests that require a live FalkorDB server (set `FALKORDB_URL`, or
+# `FALKORDB_HOST`/`FALKORDB_PORT`).
 test-integration:
-    FALKORDB_URL="falkor://{{host}}:{{port}}" cargo nextest run --all --run-ignored ignored-only
+    FALKORDB_URL="{{url}}" cargo nextest run --all --run-ignored ignored-only
 
 # Start a FalkorDB server in Docker on the configured port.
 db-up:

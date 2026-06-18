@@ -3,7 +3,7 @@
 //! These are `#[ignore]`d so they never run in the hermetic CI suite. Run them with a server up:
 //!
 //! ```text
-//! just test-integration            # against an already-running server (FALKORDB_URL)
+//! just test-integration            # against a running server (FALKORDB_URL, or FALKORDB_HOST/PORT)
 //! just test-integration-local      # spin up FalkorDB in Docker, run these, tear it down
 //! ```
 //!
