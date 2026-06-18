@@ -8,8 +8,9 @@
 and connects to FalkorDB with the async [`falkordb`](https://crates.io/crates/falkordb) client. It is
 the companion server to the [`falkordb-rs`](https://github.com/FalkorDB/falkordb-rs) client library.
 
-**v1 is read-only by design.** Every query runs through the FalkorDB `GRAPH.RO_QUERY` command, which
-the server rejects if it attempts a write. Guarded write tools are a later, opt-in addition.
+**Read-only by default.** The read tools run through the FalkorDB `GRAPH.RO_QUERY` command, which the
+server rejects if a query attempts a write. **Guarded write tools are opt-in** — `query_write` and
+`profile` are only exposed when the operator starts the server with `FALKORDB_MCP_ALLOW_WRITES=1`.
 
 ## Tools
 
@@ -19,6 +20,10 @@ the server rejects if it attempts a write. Guarded write tools are a later, opt-
 | `get_schema` | `graph` | A graph's schema: labels, relationship types, property keys, indexes, constraints. |
 | `query_read` | `graph`, `cypher`, `params?`, `limit?` | Run a **read-only** Cypher query and return rows as JSON. Writes are rejected server-side. |
 | `explain` | `graph`, `cypher` | Return the query plan for a Cypher query **without executing it**. |
+| `query_write` 🔒 | `graph`, `cypher`, `params?`, `limit?` | Run a **writing** Cypher query (`CREATE`/`MERGE`/`SET`/`DELETE`) and return rows. |
+| `profile` 🔒 | `graph`, `cypher` | **Execute** a query and return its profiled plan (`GRAPH.PROFILE` runs it). |
+
+🔒 = write-gated: present only when `FALKORDB_MCP_ALLOW_WRITES=1` (see [Writes](#writes-opt-in)).
 
 Results are capped (`limit`, default `FALKORDB_MCP_MAX_ROWS`) so a broad query can't flood the model's
 context; a capped result is flagged as truncated.
@@ -121,15 +126,46 @@ The connection is taken from the **operator's environment only**, never from a t
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `FALKORDB_URL` | `falkor://127.0.0.1:6379` | FalkorDB connection URL. |
-| `FALKORDB_MCP_MAX_ROWS` | `1000` | Default row cap for `query_read`. |
+| `FALKORDB_MCP_MAX_ROWS` | `1000` | Default row cap for `query_read`/`query_write`. |
+| `FALKORDB_MCP_ALLOW_WRITES` | `0` | Set to `1`/`true`/`yes`/`on` to expose the write-gated tools. |
 
 All logging goes to **stderr** (`RUST_LOG` controls verbosity); **stdout is reserved for the MCP
 protocol**.
+
+## Writes (opt-in)
+
+Writes are **off by default**. Start the server with `FALKORDB_MCP_ALLOW_WRITES=1` to expose two extra
+tools:
+
+- `query_write` — runs a writing Cypher query (`GRAPH.QUERY`).
+- `profile` — **executes** a query and returns its profiled plan (`GRAPH.PROFILE` runs the query, so
+  it is classified write-capable).
+
+When writes are disabled, these tools are not even listed in `tools/list`, so the assistant can't see
+or call them; a call is also rejected server-side as a second line of defense. Even with writes
+enabled, your MCP client still asks you to approve each tool call — the env flag is the operator's
+opt-in, the per-call prompt is yours.
+
+```json
+{
+  "mcpServers": {
+    "falkordb": {
+      "command": "falkordb-mcp",
+      "env": {
+        "FALKORDB_URL": "falkor://127.0.0.1:6379",
+        "FALKORDB_MCP_ALLOW_WRITES": "1"
+      }
+    }
+  }
+}
+```
 
 ## Safety
 
 - **Read-only by construction.** `query_read` uses `GRAPH.RO_QUERY`; the server rejects writes — the
   server never parses Cypher to guess intent. `explain` does not execute the query.
+- **Writes are opt-in and gated.** `query_write`/`profile` are only registered when
+  `FALKORDB_MCP_ALLOW_WRITES=1`, and re-checked at call time.
 - **No credentials in tool surface.** Connection details come only from the environment, and
   credentials are scrubbed from any error returned to the client.
 - **Bounded output.** Row caps keep results from overwhelming the model.
