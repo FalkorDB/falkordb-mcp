@@ -177,7 +177,12 @@ async fn single_column(
     graph: &mut AsyncGraph,
     query: &str,
 ) -> anyhow::Result<Vec<String>> {
-    let mut data = graph.ro_query(query).execute().await?.data;
+    let mut data = graph
+        .ro_query(query)
+        .with_timeout(QUERY_TIMEOUT_MS)
+        .execute()
+        .await?
+        .data;
     let mut out = Vec::with_capacity(data.len());
     while let Some(row) = data.next().await {
         if let Some(value) = row?.into_values().into_iter().next() {

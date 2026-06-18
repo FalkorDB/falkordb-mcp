@@ -79,7 +79,7 @@ test-one filter:
 test-doc:
     cargo test --doc
 
-# === Coverage (hermetic — no server required) ================================
+# === Coverage (needs a reachable FalkorDB server — runs hermetic + live tests) ===============
 
 # Generate Codecov JSON coverage (matches the `coverage` CI job): the hermetic suite PLUS the live
 # integration tests, so it covers the real FalkorDB backend and needs a reachable server
