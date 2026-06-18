@@ -44,9 +44,10 @@ context; a capped result is flagged as truncated.
 
 What actually happens between the assistant and this server. Each example starts with the user's
 prompt, shows the tool calls the model makes (**▸ request** to the server, **◂ response** from it),
-and ends with the answer the model gives back. The blocks are **illustrative transcripts**, not
-copy-paste payloads; the **◂ responses are captured verbatim from a live server** against a demo
-`imdb` graph.
+and ends with the answer the model gives back. The presentation is a **simplified transcript** — a
+`▸ tool { arguments }` line and the response payload, rather than the literal MCP JSON-RPC envelope —
+but the **response *content* is real**: the `◂` payloads were captured from the running server against
+a demo `imdb` graph.
 
 ### 1. Answering a question from live data
 
