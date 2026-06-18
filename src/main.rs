@@ -20,10 +20,15 @@ async fn main() -> Result<()> {
         .init();
 
     let config = Config::from_env();
-    tracing::info!(url = %config.url, max_rows = config.max_rows, "starting falkordb-mcp");
+    tracing::info!(
+        url = %config.url,
+        max_rows = config.max_rows,
+        allow_writes = config.allow_writes,
+        "starting falkordb-mcp"
+    );
 
     let backend = FalkorClientBackend::connect(&config.url).await?;
-    let server = FalkorMcp::new(Arc::new(backend), config.max_rows);
+    let server = FalkorMcp::new(Arc::new(backend), config.max_rows, config.allow_writes);
 
     let service = server.serve(stdio()).await?;
     service.waiting().await?;

@@ -215,3 +215,39 @@ async fn explain_returns_a_plan_without_executing() {
     let plan = result.expect("explain");
     assert!(!plan.is_empty(), "plan should have at least one step");
 }
+
+#[tokio::test]
+#[ignore = "requires a live FalkorDB server (just test-integration)"]
+async fn write_query_creates_and_returns_rows() {
+    let (result, _name) = run_live("write", "CREATE (:Seed)", |backend, name| async move {
+        let mut params = BTreeMap::new();
+        params.insert("name".to_string(), json!("Neo"));
+        backend
+            .write_query(
+                &name,
+                "CREATE (p:Person {name: $name}) RETURN p.name AS created",
+                params,
+                100,
+            )
+            .await
+    })
+    .await;
+
+    let out = result.expect("write_query");
+    assert_eq!(out.columns, vec!["created".to_string()]);
+    assert_eq!(out.rows, vec![vec![json!("Neo")]]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires a live FalkorDB server (just test-integration)"]
+async fn profile_executes_and_returns_a_plan() {
+    let (result, _name) = run_live(
+        "profile",
+        "CREATE (:Person {name: 'Neo'})",
+        |backend, name| async move { backend.profile(&name, "MATCH (p:Person) RETURN p").await },
+    )
+    .await;
+
+    let plan = result.expect("profile");
+    assert!(!plan.is_empty(), "profile should return a plan");
+}

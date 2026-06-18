@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected server-side) with named JSON parameter binding, a server-side timeout, and an output row
   cap that flags `truncated`; results map to JSON via explicit DTOs; schema introspection covers
   labels, relationship types, property keys, indexes, and constraints.
+- Opt-in guarded write tools, off by default: `query_write` (`GRAPH.QUERY`) and `profile`
+  (`GRAPH.PROFILE`, which executes the query). They are registered — and even listed in `tools/list` —
+  only when the operator sets `FALKORDB_MCP_ALLOW_WRITES=1`, and are re-checked at call time.
 - Engineering scaffolding mirroring the `falkordb-rs` repo: a `just`-driven workflow, hermetic
   fake-backend tests plus opt-in live integration tests, and CI for fmt/clippy/build/doc/deny/test,
   coverage, spellcheck (Markdown + PR title), CodeQL, and release-plz publishing.

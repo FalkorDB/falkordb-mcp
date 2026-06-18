@@ -42,24 +42,56 @@ pub struct ExplainArg {
     pub cypher: String,
 }
 
-/// The FalkorDB MCP server. Read-only in v1.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct WriteQueryArg {
+    /// The name of the graph to modify.
+    pub graph: String,
+    /// A Cypher query that may write (`CREATE`/`MERGE`/`SET`/`DELETE`). Prefer adding a `LIMIT` to any
+    /// `RETURN`.
+    pub cypher: String,
+    /// Optional query parameters, bound by name (do not string-interpolate values into `cypher`).
+    #[serde(default)]
+    pub params: serde_json::Map<String, serde_json::Value>,
+    /// Maximum rows to return (defaults to, and is capped at, the server's row cap).
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ProfileArg {
+    /// The name of the graph.
+    pub graph: String,
+    /// The Cypher query to execute and profile (it **is** run).
+    pub cypher: String,
+}
+
+/// The FalkorDB MCP server. Read-only by default; write tools are registered only when the operator
+/// enables writes.
 #[derive(Clone)]
 pub struct FalkorMcp {
     backend: Arc<dyn FalkorBackend>,
     max_rows: usize,
+    allow_writes: bool,
     tool_router: ToolRouter<FalkorMcp>,
 }
 
-#[tool_router]
+#[tool_router(router = read_tool_router)]
 impl FalkorMcp {
+    /// Build a server. When `allow_writes` is `true`, the guarded write tools (`query_write`,
+    /// `profile`) are added to the router; otherwise they are not even listed.
     pub fn new(
         backend: Arc<dyn FalkorBackend>,
         max_rows: usize,
+        allow_writes: bool,
     ) -> Self {
+        let mut tool_router = Self::read_tool_router();
+        if allow_writes {
+            tool_router += Self::write_tool_router();
+        }
         Self {
             backend,
             max_rows,
-            tool_router: Self::tool_router(),
+            allow_writes,
+            tool_router,
         }
     }
 
@@ -116,16 +148,77 @@ impl FalkorMcp {
     }
 }
 
+#[tool_router(router = write_tool_router)]
+impl FalkorMcp {
+    #[tool(
+        description = "Run a WRITE Cypher query (CREATE/MERGE/SET/DELETE) and return rows as JSON. \
+                       Only available when the server is started with writes enabled. Results are \
+                       capped; add a LIMIT to large RETURNs."
+    )]
+    async fn query_write(
+        &self,
+        Parameters(arg): Parameters<WriteQueryArg>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ensure_writes_allowed()?;
+        let limit = arg.limit.unwrap_or(self.max_rows).min(self.max_rows);
+        let params = arg.params.into_iter().collect();
+        let out = self
+            .backend
+            .write_query(&arg.graph, &arg.cypher, params, limit)
+            .await
+            .map_err(internal)?;
+        json_result(&out)
+    }
+
+    #[tool(
+        description = "EXECUTE a Cypher query and return its profiled plan (GRAPH.PROFILE) with \
+                       per-operation row counts. This RUNS the query, so it is write-gated."
+    )]
+    async fn profile(
+        &self,
+        Parameters(ProfileArg { graph, cypher }): Parameters<ProfileArg>,
+    ) -> Result<CallToolResult, McpError> {
+        self.ensure_writes_allowed()?;
+        let plan = self
+            .backend
+            .profile(&graph, &cypher)
+            .await
+            .map_err(internal)?;
+        json_result(&plan)
+    }
+}
+
+impl FalkorMcp {
+    /// Defense-in-depth: the write tools aren't registered when writes are disabled, but re-check the
+    /// flag at call time so the guard cannot be bypassed.
+    fn ensure_writes_allowed(&self) -> Result<(), McpError> {
+        if self.allow_writes {
+            Ok(())
+        } else {
+            Err(McpError::invalid_request(
+                "writes are disabled on this server (start it with FALKORDB_MCP_ALLOW_WRITES=1)",
+                None,
+            ))
+        }
+    }
+}
+
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for FalkorMcp {
     fn get_info(&self) -> ServerInfo {
+        let mut instructions = String::from(
+            "Read access to a FalkorDB graph database. Use get_schema to learn the real labels/keys, \
+             query_read for data (read-only, capped), and explain for query plans.",
+        );
+        if self.allow_writes {
+            instructions.push_str(
+                " Writes are ENABLED: query_write runs writing Cypher and profile executes a query \
+                 to show its profiled plan — confirm each with the user before running it.",
+            );
+        }
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::from_build_env())
-            .with_instructions(
-                "Read-only access to a FalkorDB graph database. Use get_schema to learn the real \
-                 labels/keys, query_read for data (read-only, capped), and explain for query plans."
-                    .to_string(),
-            )
+            .with_instructions(instructions)
     }
 }
 
@@ -161,7 +254,11 @@ mod tests {
     use std::sync::Mutex;
 
     fn server() -> FalkorMcp {
-        FalkorMcp::new(Arc::new(FakeBackend), DEFAULT_MAX_ROWS)
+        FalkorMcp::new(Arc::new(FakeBackend), DEFAULT_MAX_ROWS, false)
+    }
+
+    fn writable_server() -> FalkorMcp {
+        FalkorMcp::new(Arc::new(FakeBackend), DEFAULT_MAX_ROWS, true)
     }
 
     /// Parse the JSON payload a tool returned in its first text content block.
@@ -255,6 +352,23 @@ mod tests {
         ) -> anyhow::Result<Vec<String>> {
             Ok(vec![])
         }
+        async fn write_query(
+            &self,
+            _graph: &str,
+            _cypher: &str,
+            _params: BTreeMap<String, serde_json::Value>,
+            limit: usize,
+        ) -> anyhow::Result<QueryOutput> {
+            *self.seen_limit.lock().unwrap() = Some(limit);
+            Ok(QueryOutput::default())
+        }
+        async fn profile(
+            &self,
+            _graph: &str,
+            _cypher: &str,
+        ) -> anyhow::Result<Vec<String>> {
+            Ok(vec![])
+        }
     }
 
     async fn effective_limit(
@@ -264,7 +378,7 @@ mod tests {
         let backend = Arc::new(RecordingBackend {
             seen_limit: Mutex::new(None),
         });
-        let server = FalkorMcp::new(backend.clone(), max_rows);
+        let server = FalkorMcp::new(backend.clone(), max_rows, false);
         server
             .query_read(Parameters(ReadQueryArg {
                 graph: "g".into(),
@@ -323,11 +437,27 @@ mod tests {
         ) -> anyhow::Result<Vec<String>> {
             Ok(vec![])
         }
+        async fn write_query(
+            &self,
+            _graph: &str,
+            _cypher: &str,
+            _params: BTreeMap<String, serde_json::Value>,
+            _limit: usize,
+        ) -> anyhow::Result<QueryOutput> {
+            Ok(QueryOutput::default())
+        }
+        async fn profile(
+            &self,
+            _graph: &str,
+            _cypher: &str,
+        ) -> anyhow::Result<Vec<String>> {
+            Ok(vec![])
+        }
     }
 
     #[tokio::test]
     async fn tool_error_surfaces_mitigation_hint() {
-        let server = FalkorMcp::new(Arc::new(ErrorBackend), DEFAULT_MAX_ROWS);
+        let server = FalkorMcp::new(Arc::new(ErrorBackend), DEFAULT_MAX_ROWS, false);
         let err = server.list_graphs().await.expect_err("backend errors");
         let hint = falkordb::FalkorDBError::ConnectionDown
             .mitigation_hint()
@@ -377,5 +507,105 @@ mod tests {
             serde_json::to_value(&out).unwrap()["truncated"],
             serde_json::json!(true)
         );
+    }
+
+    #[test]
+    fn write_tools_listed_only_when_enabled() {
+        let read_only: Vec<String> = server()
+            .tool_router
+            .list_all()
+            .iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        assert_eq!(read_only.len(), 4, "read-only server exposes 4 tools");
+        assert!(!read_only.contains(&"query_write".to_string()));
+        assert!(!read_only.contains(&"profile".to_string()));
+
+        let writable: Vec<String> = writable_server()
+            .tool_router
+            .list_all()
+            .iter()
+            .map(|t| t.name.to_string())
+            .collect();
+        assert_eq!(writable.len(), 6, "writable server exposes 6 tools");
+        assert!(writable.contains(&"query_write".to_string()));
+        assert!(writable.contains(&"profile".to_string()));
+    }
+
+    #[test]
+    fn get_info_mentions_writes_only_when_enabled() {
+        assert!(!server()
+            .get_info()
+            .instructions
+            .expect("instructions")
+            .contains("Writes are ENABLED"));
+        assert!(writable_server()
+            .get_info()
+            .instructions
+            .expect("instructions")
+            .contains("Writes are ENABLED"));
+    }
+
+    #[tokio::test]
+    async fn query_write_blocked_when_writes_disabled() {
+        let err = server()
+            .query_write(Parameters(WriteQueryArg {
+                graph: "g".into(),
+                cypher: "CREATE (:N)".into(),
+                params: serde_json::Map::new(),
+                limit: None,
+            }))
+            .await
+            .expect_err("writes disabled");
+        assert!(
+            err.message.contains("writes are disabled"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_blocked_when_writes_disabled() {
+        let err = server()
+            .profile(Parameters(ProfileArg {
+                graph: "g".into(),
+                cypher: "MATCH (n) RETURN n".into(),
+            }))
+            .await
+            .expect_err("writes disabled");
+        assert!(
+            err.message.contains("writes are disabled"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[tokio::test]
+    async fn query_write_runs_when_writes_enabled() {
+        let result = writable_server()
+            .query_write(Parameters(WriteQueryArg {
+                graph: "g".into(),
+                cypher: "CREATE (:N)".into(),
+                params: serde_json::Map::new(),
+                limit: None,
+            }))
+            .await
+            .expect("write ok");
+        assert_eq!(
+            tool_json(&result)["columns"],
+            serde_json::json!(["nodes_created"])
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_runs_when_writes_enabled() {
+        let result = writable_server()
+            .profile(Parameters(ProfileArg {
+                graph: "g".into(),
+                cypher: "MATCH (n) RETURN n".into(),
+            }))
+            .await
+            .expect("profile ok");
+        assert!(!tool_json(&result).as_array().unwrap().is_empty());
     }
 }

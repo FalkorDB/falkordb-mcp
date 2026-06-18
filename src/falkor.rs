@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 use async_trait::async_trait;
 use falkordb::{
     AsyncGraph, Edge, FalkorAsyncClient, FalkorClientBuilder, FalkorConnectionInfo, FalkorValue,
-    Node, Path, Point, Row,
+    Node, Path, Point, QueryResult, Row, RowStream,
 };
 use serde_json::{Map, Value};
 use tokio_stream::StreamExt;
@@ -110,37 +110,31 @@ impl FalkorBackend for FalkorClientBackend {
         params: BTreeMap<String, serde_json::Value>,
         limit: usize,
     ) -> anyhow::Result<QueryOutput> {
-        let falkor_params: BTreeMap<String, FalkorValue> = params
-            .into_iter()
-            .map(|(k, v)| (k, json_to_falkor(v)))
-            .collect();
-
         let mut graph = self.client.select_graph(graph);
         let result = graph
             .ro_query(cypher)
-            .with_params(falkor_params)
+            .with_params(to_falkor_params(params))
             .with_timeout(QUERY_TIMEOUT_MS)
             .execute()
             .await?;
+        collect_rows(result, limit).await
+    }
 
-        let columns: Vec<String> = result.header.iter().cloned().collect();
-        let mut data = result.data;
-        let total = data.len();
-        let truncated = total > limit;
-
-        let mut rows = Vec::with_capacity(total.min(limit));
-        while rows.len() < limit {
-            match data.next().await {
-                Some(row) => rows.push(row_to_json(row?)),
-                None => break,
-            }
-        }
-
-        Ok(QueryOutput {
-            columns,
-            rows,
-            truncated,
-        })
+    async fn write_query(
+        &self,
+        graph: &str,
+        cypher: &str,
+        params: BTreeMap<String, serde_json::Value>,
+        limit: usize,
+    ) -> anyhow::Result<QueryOutput> {
+        let mut graph = self.client.select_graph(graph);
+        let result = graph
+            .query(cypher)
+            .with_params(to_falkor_params(params))
+            .with_timeout(QUERY_TIMEOUT_MS)
+            .execute()
+            .await?;
+        collect_rows(result, limit).await
     }
 
     async fn explain(
@@ -148,27 +142,90 @@ impl FalkorBackend for FalkorClientBackend {
         graph: &str,
         cypher: &str,
     ) -> anyhow::Result<Vec<String>> {
-        // `falkordb`'s `ExecutionPlan` holds `Rc`, so `explain().execute()` is a `!Send` future that
-        // can't be `.await`ed directly inside this `Send`-required trait method. Drive it to
-        // completion on the current worker via `block_in_place` + `Handle::block_on` (there is no
-        // `.await` in this method body, so its own future stays `Send`). This needs the multi-thread
-        // runtime, which the binary uses (`#[tokio::main]`). See `docs/upstream-falkordb-rs.md` for
-        // the one-line upstream change that would let this be a plain `.await` on any runtime.
-        if tokio::runtime::Handle::current().runtime_flavor()
-            == tokio::runtime::RuntimeFlavor::CurrentThread
-        {
-            anyhow::bail!(
-                "the explain tool requires the server to run on a multi-threaded runtime"
-            );
-        }
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let mut graph = self.client.select_graph(graph);
-                let plan = graph.explain(cypher).execute().await?;
-                anyhow::Ok(plan.plan().to_vec())
-            })
-        })
+        run_plan(&self.client, graph, cypher, PlanKind::Explain)
     }
+
+    async fn profile(
+        &self,
+        graph: &str,
+        cypher: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        run_plan(&self.client, graph, cypher, PlanKind::Profile)
+    }
+}
+
+/// Whether a plan request should execute the query (`PROFILE`) or not (`EXPLAIN`).
+#[derive(Clone, Copy)]
+enum PlanKind {
+    Explain,
+    Profile,
+}
+
+/// Build a query plan, working around `ExecutionPlan` being `!Send`.
+///
+/// `falkordb`'s `ExecutionPlan` holds `Rc`, so `explain()/profile().execute()` is a `!Send` future
+/// that can't be `.await`ed directly inside a `Send`-required trait method. Drive it to completion on
+/// the current worker via `block_in_place` + `Handle::block_on` (no `.await` escapes this function, so
+/// the caller's future stays `Send`). This needs the multi-thread runtime, which the binary uses
+/// (`#[tokio::main]`). See `docs/upstream-falkordb-rs.md` for the upstream change that would remove it.
+fn run_plan(
+    client: &FalkorAsyncClient,
+    graph_name: &str,
+    cypher: &str,
+    kind: PlanKind,
+) -> anyhow::Result<Vec<String>> {
+    if tokio::runtime::Handle::current().runtime_flavor()
+        == tokio::runtime::RuntimeFlavor::CurrentThread
+    {
+        let tool = match kind {
+            PlanKind::Explain => "explain",
+            PlanKind::Profile => "profile",
+        };
+        anyhow::bail!("the {tool} tool requires the server to run on a multi-threaded runtime");
+    }
+    tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(async {
+            let mut graph = client.select_graph(graph_name);
+            let plan = match kind {
+                PlanKind::Explain => graph.explain(cypher).execute().await?,
+                PlanKind::Profile => graph.profile(cypher).execute().await?,
+            };
+            anyhow::Ok(plan.plan().to_vec())
+        })
+    })
+}
+
+/// Convert incoming JSON parameters into FalkorDB values for safe, named query binding.
+fn to_falkor_params(params: BTreeMap<String, serde_json::Value>) -> BTreeMap<String, FalkorValue> {
+    params
+        .into_iter()
+        .map(|(k, v)| (k, json_to_falkor(v)))
+        .collect()
+}
+
+/// Drain a result's rows (capped at `limit`) into a [`QueryOutput`], flagging truncation.
+async fn collect_rows(
+    result: QueryResult<RowStream>,
+    limit: usize,
+) -> anyhow::Result<QueryOutput> {
+    let columns: Vec<String> = result.header.iter().cloned().collect();
+    let mut data = result.data;
+    let total = data.len();
+    let truncated = total > limit;
+
+    let mut rows = Vec::with_capacity(total.min(limit));
+    while rows.len() < limit {
+        match data.next().await {
+            Some(row) => rows.push(row_to_json(row?)),
+            None => break,
+        }
+    }
+
+    Ok(QueryOutput {
+        columns,
+        rows,
+        truncated,
+    })
 }
 
 /// Run a read-only query that yields a single column, returning that column's values as strings.
