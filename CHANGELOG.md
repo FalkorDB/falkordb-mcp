@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0](https://github.com/FalkorDB/falkordb-mcp/releases/tag/v0.1.0) - 2026-06-18
+
 ### Added
 
 - Initial `falkordb-mcp` Model Context Protocol server (read-only v1): a stdio MCP server, built
