@@ -374,8 +374,8 @@ opt-in, the per-call prompt is yours.
   server never parses Cypher to guess intent. `explain` does not execute the query.
 - **Writes are opt-in and gated.** `query_write`/`profile` are only registered when
   `FALKORDB_MCP_ALLOW_WRITES=1`, and re-checked at call time.
-- **No credentials in tool surface.** Connection details come only from the environment, and
-  credentials are scrubbed from any error returned to the client.
+- **No credentials in tool surface.** Connection details come only from the operator's environment,
+  never from a tool call, and the startup connection error never echoes the connection URL.
 - **Bounded output.** Row caps keep results from overwhelming the model.
 
 ## Development
