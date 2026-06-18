@@ -1,9 +1,9 @@
 name: Release branch jobs
 
+# Least privilege by default: the check jobs only read the repo. The publish job below grants itself
+# the extra permissions it needs (see the `crates-io` job).
 permissions:
-  pull-requests: write
-  contents: write
-  id-token: write # mint a short-lived crates.io token via OIDC trusted publishing
+  contents: read
 
 on:
   push:
@@ -130,6 +130,13 @@ jobs:
       - deny
       - test
     runs-on: ubuntu-latest
+    # Scope the elevated permissions to just this job (job-level perms replace the workflow defaults):
+    # release-plz needs contents/pull-requests write to push tags and open the release PR, and
+    # id-token write to mint the short-lived crates.io token via OIDC.
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
