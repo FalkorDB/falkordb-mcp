@@ -57,6 +57,24 @@ pub trait FalkorBackend: Send + Sync {
         graph: &str,
         cypher: &str,
     ) -> anyhow::Result<Vec<String>>;
+
+    /// Run a **write** query (`GRAPH.QUERY`) with a row cap and timeout. Guarded: the server only
+    /// exposes this when started with writes enabled.
+    async fn write_query(
+        &self,
+        graph: &str,
+        cypher: &str,
+        params: BTreeMap<String, serde_json::Value>,
+        limit: usize,
+    ) -> anyhow::Result<QueryOutput>;
+
+    /// Execute `cypher` and return its profiled plan (`GRAPH.PROFILE`). Guarded like
+    /// [`write_query`](Self::write_query) because `PROFILE` **runs** the query.
+    async fn profile(
+        &self,
+        graph: &str,
+        cypher: &str,
+    ) -> anyhow::Result<Vec<String>>;
 }
 
 /// A canned backend for tests and protocol smoke-checks — no database required.
@@ -103,5 +121,30 @@ impl FalkorBackend for FakeBackend {
         _cypher: &str,
     ) -> anyhow::Result<Vec<String>> {
         Ok(vec!["Results".into(), "    Project".into()])
+    }
+
+    async fn write_query(
+        &self,
+        _graph: &str,
+        _cypher: &str,
+        _params: BTreeMap<String, serde_json::Value>,
+        _limit: usize,
+    ) -> anyhow::Result<QueryOutput> {
+        Ok(QueryOutput {
+            columns: vec!["nodes_created".into()],
+            rows: vec![vec![serde_json::json!(1)]],
+            truncated: false,
+        })
+    }
+
+    async fn profile(
+        &self,
+        _graph: &str,
+        _cypher: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        Ok(vec![
+            "Results".into(),
+            "    Create | Records created: 1".into(),
+        ])
     }
 }
