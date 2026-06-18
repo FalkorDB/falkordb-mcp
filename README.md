@@ -131,6 +131,115 @@ write:
 **Value:** safety is enforced by the database, not by trusting the model to behave. Writes are an
 explicit operator opt-in (see [Writes](#writes-opt-in)).
 
+### 4. Following relationships across the graph
+
+> **You:** "Who has Keanu Reeves co-starred with?"
+
+This is a multi-hop traversal — actor → movie ← other actor — the kind of join-of-joins that's awkward
+in SQL but native to a graph:
+
+```text
+▸ query_read {
+    "graph": "imdb",
+    "cypher": "MATCH (k:Actor {name: $name})-[:ACTED_IN]->(:Movie)<-[:ACTED_IN]-(co:Actor)
+               WHERE co <> k RETURN DISTINCT co.name AS costar ORDER BY costar",
+    "params": { "name": "Keanu Reeves" }
+  }
+◂ {
+    "columns": ["costar"],
+    "rows": [["Carrie-Anne Moss"], ["Hugo Weaving"], ["Laurence Fishburne"]],
+    "truncated": false
+  }
+```
+
+> **Assistant:** "Keanu Reeves has co-starred with Carrie-Anne Moss, Hugo Weaving, and Laurence
+> Fishburne."
+
+**Value:** the model can walk relationships several hops deep against live data — the graph's core
+strength — instead of approximating it from a static description.
+
+### 5. Aggregating across the graph
+
+> **You:** "Who are the most prolific actors in this graph?"
+
+```text
+▸ query_read {
+    "graph": "imdb",
+    "cypher": "MATCH (a:Actor)-[:ACTED_IN]->(m:Movie)
+               RETURN a.name AS actor, count(m) AS movies ORDER BY movies DESC, actor"
+  }
+◂ {
+    "columns": ["actor", "movies"],
+    "rows": [["Keanu Reeves", 3], ["Carrie-Anne Moss", 2], ["Hugo Weaving", 1], ["Laurence Fishburne", 1]],
+    "truncated": false
+  }
+```
+
+> **Assistant:** "Keanu Reeves leads with 3 movies, followed by Carrie-Anne Moss with 2; Hugo Weaving
+> and Laurence Fishburne have 1 each."
+
+**Value:** analytics (counts, groupings, ordering) run directly on the current data — no export step, no
+stale snapshot.
+
+### 6. Returning whole nodes
+
+> **You:** "Give me everything you have on *The Matrix*."
+
+When a query returns a node (rather than scalar columns), the server serializes it as a structured DTO
+with its `id`, `labels`, and `properties`:
+
+```text
+▸ query_read { "graph": "imdb", "cypher": "MATCH (m:Movie {title: 'The Matrix'}) RETURN m" }
+◂ {
+    "columns": ["m"],
+    "rows": [[
+      { "id": 4, "labels": ["Movie"], "properties": { "rating": 8.7, "title": "The Matrix", "year": 1999 } }
+    ]],
+    "truncated": false
+  }
+```
+
+> **Assistant:** "*The Matrix* (1999) has a rating of 8.7."
+
+**Value:** nodes, relationships, and paths come back as clean, predictable JSON the model can read
+field-by-field — no bespoke parsing.
+
+### 7. Making a change (writes opted in)
+
+With `FALKORDB_MCP_ALLOW_WRITES=1`, the same gated path also exposes `query_write` and `profile`.
+
+> **You:** "Add the movie *The Matrix Resurrections* (2021) with Keanu as Neo."
+
+```text
+▸ query_write {
+    "graph": "imdb",
+    "cypher": "MATCH (a:Actor {name: $actor})
+               CREATE (a)-[:ACTED_IN {role: $role}]->(m:Movie {title: $title, year: 2021})
+               RETURN m.title AS added",
+    "params": { "actor": "Keanu Reeves", "role": "Neo", "title": "The Matrix Resurrections" }
+  }
+◂ { "columns": ["added"], "rows": [["The Matrix Resurrections"]], "truncated": false }
+```
+
+`profile` then *executes* a query and reports per-operation row counts and timings — useful for
+confirming an index is actually used:
+
+```text
+▸ profile { "graph": "imdb", "cypher": "MATCH (a:Actor {name:'Keanu Reeves'})-[:ACTED_IN]->(m:Movie) RETURN m.title" }
+◂ [
+    "Results | Records produced: 4, Execution time: 0.000747 ms",
+    "    Project | Records produced: 4, Execution time: 0.005751 ms",
+    "        Conditional Traverse | (a)->(m:Movie) | Records produced: 4, Execution time: 0.231542 ms",
+    "            Node By Index Scan | (a:Actor) | Records produced: 1, Execution time: 0.040667 ms"
+  ]
+```
+
+> **Assistant:** "Added *The Matrix Resurrections* (2021) with Keanu as Neo. Keanu now has 4 movies, and
+> the lookup uses the `Actor(name)` index (`Node By Index Scan`)."
+
+**Value:** when an operator opts in, the assistant can make changes and measure real execution — still
+through the same parameterized, gated interface.
+
 ## Why an MCP server (not a Markdown doc or a "skill")?
 
 You could instead describe your graph to the assistant some other way — a Markdown file, an `llms.txt`,
