@@ -1,4 +1,16 @@
+[![Release](https://img.shields.io/github/release/falkordb/falkordb-mcp.svg)](https://github.com/falkordb/falkordb-mcp/releases/latest)
+[![crates.io](https://img.shields.io/crates/dr/falkordb-mcp)](https://crates.io/crates/falkordb-mcp)
+[![license](https://img.shields.io/crates/l/falkordb-mcp)](https://github.com/FalkorDB/falkordb-mcp?tab=License-1-ov-file)\
+[![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/falkordb/falkordb-mcp)](https://github.com/FalkorDB/falkordb-mcp/issues)
+[![Pipeline](https://img.shields.io/github/actions/workflow/status/falkordb/falkordb-mcp/main.yml)](https://github.com/FalkorDB/falkordb-mcp)
+[![Codecov](https://codecov.io/gh/falkordb/falkordb-mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/falkordb/falkordb-mcp)
+[![Docs](https://img.shields.io/docsrs/falkordb-mcp)](https://docs.rs/falkordb-mcp/latest/falkordb_mcp/)\
+[![Forum](https://img.shields.io/badge/Forum-falkordb-blue)](https://github.com/orgs/FalkorDB/discussions)
+[![Discord](https://img.shields.io/discord/1146782921294884966?style=flat-square)](https://discord.com/invite/6M4QwDXn2w)
+
 # falkordb-mcp
+
+[![Try Free](https://img.shields.io/badge/Try%20Free-FalkorDB%20Cloud-FF8101?labelColor=FDE900&style=for-the-badge&link=https://app.falkordb.cloud)](https://app.falkordb.cloud)
 
 > A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that lets AI assistants
 > explore a **live** [FalkorDB](https://www.falkordb.com/) graph database — list graphs, inspect
