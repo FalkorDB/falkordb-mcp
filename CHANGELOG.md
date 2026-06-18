@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/FalkorDB/falkordb-mcp/compare/v0.1.0...v0.1.1) - 2026-06-18
+
+### Other
+
+- attribute existing changelog entries to the 0.1.0 release ([#7](https://github.com/FalkorDB/falkordb-mcp/pull/7))
+- add README badges mirroring falkordb-rs ([#6](https://github.com/FalkorDB/falkordb-mcp/pull/6))
+- publish to crates.io with trusted publishing (OIDC) ([#5](https://github.com/FalkorDB/falkordb-mcp/pull/5))
+- *(deps)* Bump actions/checkout from 6.0.3 to 7.0.0 ([#3](https://github.com/FalkorDB/falkordb-mcp/pull/3))
+
 ## [0.1.0](https://github.com/FalkorDB/falkordb-mcp/releases/tag/v0.1.0) - 2026-06-18
 
 ### Added
