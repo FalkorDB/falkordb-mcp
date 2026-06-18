@@ -14,6 +14,7 @@
 
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::hash::{BuildHasher, Hasher};
 
 use falkordb::{FalkorClientBuilder, FalkorConnectionInfo};
 use falkordb_mcp::backend::FalkorBackend;
@@ -67,16 +68,21 @@ where
     F: FnOnce(FalkorClientBackend, String) -> Fut,
     Fut: Future<Output = anyhow::Result<T>>,
 {
-    // PID + a high-resolution timestamp keeps the name unique across concurrent runs (even on
-    // different hosts that might reuse a PID) so tests never collide on a shared server.
-    let nonce = std::time::SystemTime::now()
+    // A random component (system-entropy-seeded via `RandomState`) plus the PID and a
+    // high-resolution timestamp, so seeded names are unique across concurrent runs and across hosts
+    // — no reliance on PID uniqueness (which can repeat across machines).
+    let rand = std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish();
+    let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or_default();
     let name = format!(
-        "falkordb_mcp_it_{}_{}_{}",
+        "falkordb_mcp_it_{:x}_{}_{}_{}",
+        rand,
         std::process::id(),
-        nonce,
+        nanos,
         suffix
     );
     let result = async {
