@@ -1,0 +1,10 @@
+/target
+.idea/
+.vscode/
+.vs/
+/codecov.json
+/dump.rdb
+venv/
+.history/
+/wordlist.dic
+/.pr-title.md

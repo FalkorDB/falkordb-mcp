@@ -1,0 +1,16 @@
+coverage:
+  status:
+    project:
+      default:
+        threshold: 2%
+    patch:
+      default:
+        # New code should be well covered, but allow some slack for diffs that
+        # include inherently hard-to-unit-test paths (the FalkorDB client glue
+        # and other network/IO error branches).
+        threshold: 5%
+
+# The binary entrypoint (process wiring: logging setup, connect, stdio serve loop) is
+# exercised by running the server, not by unit tests, so it is excluded from coverage.
+ignore:
+  - "src/main.rs"

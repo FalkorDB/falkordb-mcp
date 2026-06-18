@@ -1,0 +1,27 @@
+[package]
+name = "falkordb-mcp"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Model Context Protocol (MCP) server for FalkorDB — lets AI assistants explore a live graph database"
+repository = "https://github.com/FalkorDB/falkordb-mcp"
+homepage = "https://www.falkordb.com/"
+license = "MIT"
+keywords = ["falkordb", "mcp", "graph-database", "ai", "cypher"]
+categories = ["database", "command-line-utilities"]
+
+[dependencies]
+falkordb = { version = "0.8.6", features = ["tokio"] }
+# rmcp moves fast; pin to an exact version and bump deliberately (see copilot-instructions.md).
+rmcp = { version = "=1.7.0", features = ["server", "macros", "schemars", "transport-io"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+rmcp = { version = "=1.7.0", features = ["client"] }
+tokio = { version = "1", features = ["io-util"] }
