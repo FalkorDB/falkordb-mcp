@@ -87,3 +87,4 @@ cov
 CodeQL
 OIDC
 io
+RPC

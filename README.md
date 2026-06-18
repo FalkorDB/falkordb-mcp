@@ -40,6 +40,203 @@ server rejects if a query attempts a write. **Guarded write tools are opt-in** �
 Results are capped (`limit`, default `FALKORDB_MCP_MAX_ROWS`) so a broad query can't flood the model's
 context; a capped result is flagged as truncated.
 
+## Example sessions
+
+What actually happens between the assistant and this server. Each example starts with the user's
+prompt, shows the tool calls the model makes (**▸ request** to the server, **◂ response** from it),
+and ends with the answer the model gives back. The presentation is a **simplified transcript** — a
+`▸ tool { arguments }` line and the response payload, rather than the literal MCP JSON-RPC envelope —
+but the **response *content* is real**: the `◂` payloads were captured from the running server against
+a demo `imdb` graph.
+
+### 1. Answering a question from live data
+
+> **You:** "Which movies did Keanu Reeves act in, and what were his roles?"
+
+The model first reads the schema, so it uses the graph's *real* labels and property keys instead of
+guessing:
+
+```text
+▸ get_schema   { "graph": "imdb" }
+◂ {
+    "labels": ["Actor", "Movie"],
+    "relationship_types": ["ACTED_IN"],
+    "property_keys": ["name", "born", "title", "year", "rating", "role"],
+    "indexes": ["NODE :Actor(name)"],
+    "constraints": []
+  }
+```
+
+Now it writes a correct, **parameterized** read query (the name is a bound parameter, never spliced
+into the Cypher) and gets real rows back:
+
+```text
+▸ query_read {
+    "graph": "imdb",
+    "cypher": "MATCH (a:Actor {name: $name})-[r:ACTED_IN]->(m:Movie) RETURN m.title AS title, m.year AS year, r.role AS role ORDER BY m.year",
+    "params": { "name": "Keanu Reeves" }
+  }
+◂ {
+    "columns": ["title", "year", "role"],
+    "rows": [
+      ["The Matrix", 1999, "Neo"],
+      ["The Matrix Reloaded", 2003, "Neo"],
+      ["John Wick", 2014, "John Wick"]
+    ],
+    "truncated": false
+  }
+```
+
+> **Assistant:** "In this graph, Keanu Reeves acted in three movies: *The Matrix* (1999) and *The
+> Matrix Reloaded* (2003) as **Neo**, and *John Wick* (2014) as **John Wick**."
+
+**Value:** the answer is grounded in the live database and the real schema — not a guess, and not a
+query the user has to run themselves.
+
+### 2. Diagnosing a slow query
+
+> **You:** "Why is `MATCH (m:Movie {title:'The Matrix'}) RETURN m` slow on a large graph?"
+
+The model inspects the plan **without executing** the query:
+
+```text
+▸ explain {
+    "graph": "imdb",
+    "cypher": "MATCH (m:Movie {title:'The Matrix'}) RETURN m"
+  }
+◂ ["Results", "    Project", "        Filter", "            Node By Label Scan | (m:Movie)"]
+```
+
+> **Assistant:** "It does a full **`Node By Label Scan`** over every `Movie`, because there's no index
+> on `Movie.title`. Add one — `CREATE INDEX FOR (m:Movie) ON (m.title)` — and the same query becomes a
+> `Node By Index Scan`. (Your `Actor.name` lookups already use an index, so they're fast.)"
+
+**Value:** the model reads the actual query plan and gives a concrete, correct optimization — the kind
+of thing a static schema doc can't tell it.
+
+### 3. Read-only by construction
+
+> **You:** "Just delete all the `Actor` nodes to clean up."
+
+Even if the model tries, the read tool runs through `GRAPH.RO_QUERY`, and the **server** refuses the
+write:
+
+```text
+▸ query_read { "graph": "imdb", "cypher": "MATCH (a:Actor) DETACH DELETE a" }
+◂ error: "An error occurred while sending the request to Redis: is to be executed only on read-only queries"
+```
+
+> **Assistant:** "I can't do that — this server is read-only, so FalkorDB rejected the delete. If you
+> really want to allow writes, the operator has to start the server with `FALKORDB_MCP_ALLOW_WRITES=1`."
+
+**Value:** safety is enforced by the database, not by trusting the model to behave. Writes are an
+explicit operator opt-in (see [Writes](#writes-opt-in)).
+
+### 4. Following relationships across the graph
+
+> **You:** "Who has Keanu Reeves co-starred with?"
+
+This is a multi-hop traversal — actor → movie ← other actor — the kind of join-of-joins that's awkward
+in SQL but native to a graph:
+
+```text
+▸ query_read {
+    "graph": "imdb",
+    "cypher": "MATCH (k:Actor {name: $name})-[:ACTED_IN]->(:Movie)<-[:ACTED_IN]-(co:Actor) WHERE co <> k RETURN DISTINCT co.name AS costar ORDER BY costar",
+    "params": { "name": "Keanu Reeves" }
+  }
+◂ {
+    "columns": ["costar"],
+    "rows": [["Carrie-Anne Moss"], ["Hugo Weaving"], ["Laurence Fishburne"]],
+    "truncated": false
+  }
+```
+
+> **Assistant:** "Keanu Reeves has co-starred with Carrie-Anne Moss, Hugo Weaving, and Laurence
+> Fishburne."
+
+**Value:** the model can walk relationships several hops deep against live data — the graph's core
+strength — instead of approximating it from a static description.
+
+### 5. Aggregating across the graph
+
+> **You:** "Who are the most prolific actors in this graph?"
+
+```text
+▸ query_read {
+    "graph": "imdb",
+    "cypher": "MATCH (a:Actor)-[:ACTED_IN]->(m:Movie) RETURN a.name AS actor, count(m) AS movies ORDER BY movies DESC, actor"
+  }
+◂ {
+    "columns": ["actor", "movies"],
+    "rows": [["Keanu Reeves", 3], ["Carrie-Anne Moss", 2], ["Hugo Weaving", 1], ["Laurence Fishburne", 1]],
+    "truncated": false
+  }
+```
+
+> **Assistant:** "Keanu Reeves leads with 3 movies, followed by Carrie-Anne Moss with 2; Hugo Weaving
+> and Laurence Fishburne have 1 each."
+
+**Value:** analytics (counts, groupings, ordering) run directly on the current data — no export step, no
+stale snapshot.
+
+### 6. Returning whole nodes
+
+> **You:** "Give me everything you have on *The Matrix*."
+
+When a query returns a node (rather than scalar columns), the server serializes it as a structured DTO
+with its `id`, `labels`, and `properties`:
+
+```text
+▸ query_read { "graph": "imdb", "cypher": "MATCH (m:Movie {title: 'The Matrix'}) RETURN m" }
+◂ {
+    "columns": ["m"],
+    "rows": [[
+      { "id": 4, "labels": ["Movie"], "properties": { "rating": 8.7, "title": "The Matrix", "year": 1999 } }
+    ]],
+    "truncated": false
+  }
+```
+
+> **Assistant:** "*The Matrix* (1999) has a rating of 8.7."
+
+**Value:** nodes, relationships, and paths come back as clean, predictable JSON the model can read
+field-by-field — no bespoke parsing.
+
+### 7. Making a change (writes opted in)
+
+With `FALKORDB_MCP_ALLOW_WRITES=1`, the same gated path also exposes `query_write` and `profile`.
+
+> **You:** "Add the movie *The Matrix Resurrections* (2021) with Keanu as Neo."
+
+```text
+▸ query_write {
+    "graph": "imdb",
+    "cypher": "MATCH (a:Actor {name: $actor}) CREATE (a)-[:ACTED_IN {role: $role}]->(m:Movie {title: $title, year: 2021}) RETURN m.title AS added",
+    "params": { "actor": "Keanu Reeves", "role": "Neo", "title": "The Matrix Resurrections" }
+  }
+◂ { "columns": ["added"], "rows": [["The Matrix Resurrections"]], "truncated": false }
+```
+
+`profile` then *executes* a query and reports per-operation row counts and timings — useful for
+confirming an index is actually used:
+
+```text
+▸ profile { "graph": "imdb", "cypher": "MATCH (a:Actor {name:'Keanu Reeves'})-[:ACTED_IN]->(m:Movie) RETURN m.title" }
+◂ [
+    "Results | Records produced: 4, Execution time: 0.000747 ms",
+    "    Project | Records produced: 4, Execution time: 0.005751 ms",
+    "        Conditional Traverse | (a)->(m:Movie) | Records produced: 4, Execution time: 0.231542 ms",
+    "            Node By Index Scan | (a:Actor) | Records produced: 1, Execution time: 0.040667 ms"
+  ]
+```
+
+> **Assistant:** "Added *The Matrix Resurrections* (2021) with Keanu as Neo. Keanu now has 4 movies, and
+> the lookup uses the `Actor(name)` index (`Node By Index Scan`)."
+
+**Value:** when an operator opts in, the assistant can make changes and measure real execution — still
+through the same parameterized, gated interface.
+
 ## Why an MCP server (not a Markdown doc or a "skill")?
 
 You could instead describe your graph to the assistant some other way — a Markdown file, an `llms.txt`,
@@ -178,8 +375,8 @@ opt-in, the per-call prompt is yours.
   server never parses Cypher to guess intent. `explain` does not execute the query.
 - **Writes are opt-in and gated.** `query_write`/`profile` are only registered when
   `FALKORDB_MCP_ALLOW_WRITES=1`, and re-checked at call time.
-- **No credentials in tool surface.** Connection details come only from the environment, and
-  credentials are scrubbed from any error returned to the client.
+- **No credentials in tool surface.** Connection details come only from the operator's environment,
+  never from a tool call, and the startup connection error never echoes the connection URL.
 - **Bounded output.** Row caps keep results from overwhelming the model.
 
 ## Development
