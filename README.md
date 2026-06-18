@@ -44,8 +44,9 @@ context; a capped result is flagged as truncated.
 
 What actually happens between the assistant and this server. Each example starts with the user's
 prompt, shows the tool calls the model makes (**▸ request** to the server, **◂ response** from it),
-and ends with the answer the model gives back. The **◂ responses are the server's real output** (a
-demo `imdb` graph; some Cypher is wrapped for readability).
+and ends with the answer the model gives back. The blocks are **illustrative transcripts**, not
+copy-paste payloads; the **◂ responses are captured from a live server** against a demo `imdb` graph
+(one long error message is shortened, marked with `…`).
 
 ### 1. Answering a question from live data
 
@@ -71,8 +72,7 @@ into the Cypher) and gets real rows back:
 ```text
 ▸ query_read {
     "graph": "imdb",
-    "cypher": "MATCH (a:Actor {name: $name})-[r:ACTED_IN]->(m:Movie)
-               RETURN m.title AS title, m.year AS year, r.role AS role ORDER BY m.year",
+    "cypher": "MATCH (a:Actor {name: $name})-[r:ACTED_IN]->(m:Movie) RETURN m.title AS title, m.year AS year, r.role AS role ORDER BY m.year",
     "params": { "name": "Keanu Reeves" }
   }
 ◂ {
@@ -141,8 +141,7 @@ in SQL but native to a graph:
 ```text
 ▸ query_read {
     "graph": "imdb",
-    "cypher": "MATCH (k:Actor {name: $name})-[:ACTED_IN]->(:Movie)<-[:ACTED_IN]-(co:Actor)
-               WHERE co <> k RETURN DISTINCT co.name AS costar ORDER BY costar",
+    "cypher": "MATCH (k:Actor {name: $name})-[:ACTED_IN]->(:Movie)<-[:ACTED_IN]-(co:Actor) WHERE co <> k RETURN DISTINCT co.name AS costar ORDER BY costar",
     "params": { "name": "Keanu Reeves" }
   }
 ◂ {
@@ -165,8 +164,7 @@ strength — instead of approximating it from a static description.
 ```text
 ▸ query_read {
     "graph": "imdb",
-    "cypher": "MATCH (a:Actor)-[:ACTED_IN]->(m:Movie)
-               RETURN a.name AS actor, count(m) AS movies ORDER BY movies DESC, actor"
+    "cypher": "MATCH (a:Actor)-[:ACTED_IN]->(m:Movie) RETURN a.name AS actor, count(m) AS movies ORDER BY movies DESC, actor"
   }
 ◂ {
     "columns": ["actor", "movies"],
@@ -213,9 +211,7 @@ With `FALKORDB_MCP_ALLOW_WRITES=1`, the same gated path also exposes `query_writ
 ```text
 ▸ query_write {
     "graph": "imdb",
-    "cypher": "MATCH (a:Actor {name: $actor})
-               CREATE (a)-[:ACTED_IN {role: $role}]->(m:Movie {title: $title, year: 2021})
-               RETURN m.title AS added",
+    "cypher": "MATCH (a:Actor {name: $actor}) CREATE (a)-[:ACTED_IN {role: $role}]->(m:Movie {title: $title, year: 2021}) RETURN m.title AS added",
     "params": { "actor": "Keanu Reeves", "role": "Neo", "title": "The Matrix Resurrections" }
   }
 ◂ { "columns": ["added"], "rows": [["The Matrix Resurrections"]], "truncated": false }
