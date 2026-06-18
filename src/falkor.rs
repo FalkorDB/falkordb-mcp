@@ -158,8 +158,7 @@ impl FalkorBackend for FalkorClientBackend {
             == tokio::runtime::RuntimeFlavor::CurrentThread
         {
             anyhow::bail!(
-                "explain requires a multi-threaded Tokio runtime (the falkordb query plan is driven \
-                 with block_in_place); run the server under #[tokio::main] / a multi-thread runtime"
+                "the explain tool requires the server to run on a multi-threaded runtime"
             );
         }
         tokio::task::block_in_place(|| {
