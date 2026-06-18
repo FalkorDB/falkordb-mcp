@@ -45,8 +45,8 @@ context; a capped result is flagged as truncated.
 What actually happens between the assistant and this server. Each example starts with the user's
 prompt, shows the tool calls the model makes (**▸ request** to the server, **◂ response** from it),
 and ends with the answer the model gives back. The blocks are **illustrative transcripts**, not
-copy-paste payloads; the **◂ responses are captured from a live server** against a demo `imdb` graph
-(one long error message is shortened, marked with `…`).
+copy-paste payloads; the **◂ responses are captured verbatim from a live server** against a demo
+`imdb` graph.
 
 ### 1. Answering a question from live data
 
@@ -122,7 +122,7 @@ write:
 
 ```text
 ▸ query_read { "graph": "imdb", "cypher": "MATCH (a:Actor) DETACH DELETE a" }
-◂ error: "… is to be executed only on read-only queries"
+◂ error: "An error occurred while sending the request to Redis: is to be executed only on read-only queries"
 ```
 
 > **Assistant:** "I can't do that — this server is read-only, so FalkorDB rejected the delete. If you
