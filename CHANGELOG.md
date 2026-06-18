@@ -18,8 +18,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Engineering scaffolding mirroring the `falkordb-rs` repo: a `just`-driven workflow, hermetic
   fake-backend tests plus opt-in live integration tests, and CI for fmt/clippy/build/doc/deny/test,
   coverage, spellcheck (Markdown + PR title), CodeQL, and release-plz publishing.
-
-### Notes
-
-- [`docs/upstream-falkordb-rs.md`](docs/upstream-falkordb-rs.md) records `falkordb` client changes
-  that would let the server drop a couple of workarounds (notably making `explain`'s future `Send`).
+- `docs/upstream-falkordb-rs.md`: notes on `falkordb` client changes that would let the server drop a
+  couple of workarounds (notably making `explain`'s future `Send`).
