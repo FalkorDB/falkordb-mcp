@@ -11,7 +11,7 @@ keywords = ["falkordb", "mcp", "graph-database", "ai", "cypher"]
 categories = ["database", "command-line-utilities"]
 
 [dependencies]
-falkordb = { version = "0.8.6", features = ["tokio"] }
+falkordb = { version = "0.10.0", features = ["tokio"] }
 # rmcp moves fast; pin to an exact version and bump deliberately (see copilot-instructions.md).
 rmcp = { version = "=1.7.0", features = ["server", "macros", "schemars", "transport-io"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "signal"] }

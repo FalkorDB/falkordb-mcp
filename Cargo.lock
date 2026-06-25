@@ -76,6 +76,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cffb0e931875b666fc4fcb20fee52e9bbd1ef836fd9e9e04ec21555f9f85f7ef"
 dependencies = [
  "fastrand",
+ "tokio",
 ]
 
 [[package]]
@@ -269,10 +270,11 @@ dependencies = [
 
 [[package]]
 name = "falkordb"
-version = "0.8.6"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ac188475634c3f22556c112d584e92d2807b47ac6f394b56fb5e1cf2da53564"
+checksum = "ef252f8895e980db625e2dc8d035f683eccc67cdf26585d4da72ab131af93398"
 dependencies = [
+ "backon",
  "futures-core",
  "parking_lot",
  "redis",
