@@ -9,6 +9,7 @@ tokio
 serde
 stdio
 JSON
+json
 schemars
 async
 Async

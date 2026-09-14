@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- add `json` to the spellcheck allowlist so Dependabot PR titles like `serde_json` pass the PR-title spellcheck gate.
+
 ## [0.1.2](https://github.com/FalkorDB/falkordb-mcp/compare/v0.1.1...v0.1.2) - 2026-06-18
 
 ### Other
